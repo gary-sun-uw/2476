@@ -276,6 +276,8 @@ void main (void)
                         switch (tree_classify(f)) {
                             case STAND:
                                 alarm_en = 0;
+                                timer_in_seconds = 0;
+                                Timer_B_stop(TIMER_B0_BASE);
                                 break;
                             case SIT:
                                 Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
