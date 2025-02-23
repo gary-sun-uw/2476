@@ -136,6 +136,10 @@ void main (void)
 
     struct bmi2_sens_data sensor_data_temp = {0};
 
+    alarm_thres = default_interval_setting.interval_mins;
+
+    bmi.aps_status = BMI2_ENABLE;
+
     int8_t rslt = bmi270_init(&bmi);
     if (rslt == BMI2_OK){
         set_accel_gyro_config(&bmi);
@@ -152,79 +156,137 @@ void main (void)
             GPIO_clearInterrupt(GPIO_PORT_P4, GPIO_PIN0);
             GPIO_enableInterrupt(GPIO_PORT_P4, GPIO_PIN0);
 
-            __bis_SR_register(LPM0_bits + GIE);
-
-            if(alarm_en == 1){
-                Timer_B_stop(TIMER_B0_BASE);
-                timer_in_seconds = 0;
-                buzz_x = 2;
-                buzz_en = 1;
+            if(interval_setting_mode == 1){
+                Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
+                if(alarm_en == 1){
+                    alarm_en = 0;
+                    timer_in_seconds = 0;
+                }
             }
 
-            if(int2_status == 1){
-                int2_status = 0;
-                bmi2_get_int_status(&int2_status_result, &bmi);
+            __bis_SR_register(LPM3_bits + GIE);
 
-                if(int2_status_result & BMI270_WRIST_GEST_STATUS_MASK){
-                    bmi270_get_feature_data(&sens_data, 1, &bmi);
-                    if (sens_data.sens_data.wrist_gesture_output == 3){
-                        //shake -> enter interval setting mode
-                        interval_setting_mode = 1;
-                        //GPIO_toggleOutputOnPin(GPIO_PORT_P1, GPIO_PIN0);
-                        buzz_x = 6;
-                        buzz_en = 1;
+            if(interval_setting_mode == 1){
+                int indx = 0;
+                Frame f[5];
+                while (indx < 5)
+                {
+                    rslt = bmi2_get_sensor_data(&sensor_data_temp, &bmi);
+                    if ((rslt == BMI2_OK) && (sensor_data_temp.status & BMI2_DRDY_ACC) &&
+                        (sensor_data_temp.status & BMI2_DRDY_GYR))
+                    {
+                        f[indx] = (struct Frame){
+                            .acc = (struct Vec3d){
+                                .x = sensor_data_temp.acc.x,
+                                .y = sensor_data_temp.acc.y,
+                                .z = sensor_data_temp.acc.z
+                            },
+                            .gyr = (struct Vec3d){
+                                .x = sensor_data_temp.gyr.x,
+                                .y = sensor_data_temp.gyr.y,
+                                .z = sensor_data_temp.gyr.z
+                            }
+                        };
+
+                        indx++;
                     }
                 }
 
-                int2_status_result = 0;
-            }
+                IntervalSetting result = classify_interval_setting(f, 5, interval_vector_min_similarity);
+                if(result.interval_mins != -1){
+                    alarm_thres = result.interval_mins;
 
+                    switch (result.interval_mins) {
+                        case 5:
+                            buzz_x = 2;
+                            break;
+                        case 10:
+                            buzz_x = 4;
+                            break;
+                        case 20:
+                            buzz_x = 6;
+                            break;
+                        case 40:
+                            buzz_x = 8;
+                            break;
+                    }
 
-            if(int1_status == 1){
-                int1_status = 0;
-                bmi2_get_int_status(&int1_status_result, &bmi);
-                /* To check the interrupt status of no-motion. */
-                if (int1_status_result & BMI270_NO_MOT_STATUS_MASK){
-                    //printf("no-motion interrupt is generated\n");
-                    int indx = 0;
-                    Frame f[5];
-                    while (indx < 5)
-                    {
-                        rslt = bmi2_get_sensor_data(&sensor_data_temp, &bmi);
-                        if ((rslt == BMI2_OK) && (sensor_data_temp.status & BMI2_DRDY_ACC) &&
-                            (sensor_data_temp.status & BMI2_DRDY_GYR))
-                        {
-                            f[indx] = (struct Frame){
-                                .acc = (struct Vec3d){
-                                    .x = sensor_data_temp.acc.x,
-                                    .y = sensor_data_temp.acc.y,
-                                    .z = sensor_data_temp.acc.z
-                                },
-                                .gyr = (struct Vec3d){
-                                    .x = sensor_data_temp.gyr.x,
-                                    .y = sensor_data_temp.gyr.y,
-                                    .z = sensor_data_temp.gyr.z
-                                }
-                            };
+                    buzz_en = 1;
+                    interval_setting_mode = 0;
+                    Timer_B_stop(TIMER_B0_BASE);
+                }
+            } else {
+                if(alarm_en == 1){
+                    Timer_B_stop(TIMER_B0_BASE);
+                    timer_in_seconds = 0;
+                    buzz_x = 2;
+                    buzz_en = 1;
+                }
 
-                            indx++;
+                if(int2_status == 1){
+                    int2_status = 0;
+                    bmi2_get_int_status(&int2_status_result, &bmi);
+
+                    if(int2_status_result & BMI270_WRIST_GEST_STATUS_MASK){
+                        bmi270_get_feature_data(&sens_data, 1, &bmi);
+                        if (sens_data.sens_data.wrist_gesture_output == 3){
+                            //shake -> enter interval setting mode
+                            interval_setting_mode = 1;
+                            buzz_x = 6;
+                            buzz_en = 1;
                         }
                     }
 
-                    indx = 0;
-                    switch (tree_classify(f)) {
-                        case STAND:
-                            alarm_en = 0;
-                            break;
-                        case SIT:
-                            Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
-                            break;
-                        case OTHER:
-                            break;
-                    }
+                    int2_status_result = 0;
                 }
 
-                int1_status_result = 0;
+
+                if(int1_status == 1){
+                    int1_status = 0;
+                    bmi2_get_int_status(&int1_status_result, &bmi);
+                    /* To check the interrupt status of no-motion. */
+                    if (int1_status_result & BMI270_NO_MOT_STATUS_MASK){
+                        //printf("no-motion interrupt is generated\n");
+                        int indx = 0;
+                        Frame f[5];
+                        while (indx < 5)
+                        {
+                            rslt = bmi2_get_sensor_data(&sensor_data_temp, &bmi);
+                            if ((rslt == BMI2_OK) && (sensor_data_temp.status & BMI2_DRDY_ACC) &&
+                                (sensor_data_temp.status & BMI2_DRDY_GYR))
+                            {
+                                f[indx] = (struct Frame){
+                                    .acc = (struct Vec3d){
+                                        .x = sensor_data_temp.acc.x,
+                                        .y = sensor_data_temp.acc.y,
+                                        .z = sensor_data_temp.acc.z
+                                    },
+                                    .gyr = (struct Vec3d){
+                                        .x = sensor_data_temp.gyr.x,
+                                        .y = sensor_data_temp.gyr.y,
+                                        .z = sensor_data_temp.gyr.z
+                                    }
+                                };
+
+                                indx++;
+                            }
+                        }
+
+                        indx = 0;
+                        switch (tree_classify(f)) {
+                            case STAND:
+                                alarm_en = 0;
+                                break;
+                            case SIT:
+                                Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
+                                break;
+                            case OTHER:
+                                break;
+                        }
+                    }
+
+                    int1_status_result = 0;
+                }
             }
 
         } while(1);
@@ -280,7 +342,7 @@ static int8_t set_accel_gyro_config(struct bmi2_dev *bmi)
     {
         /* NOTE: The user can change the following configuration parameters according to their requirement. */
         /* Set Output Data Rate */
-        config[ACCEL].cfg.acc.odr = BMI2_ACC_ODR_200HZ;
+        config[ACCEL].cfg.acc.odr = BMI2_ACC_ODR_25HZ;
 
         /* Gravity range of the sensor (+/- 2G, 4G, 8G, 16G). */
         config[ACCEL].cfg.acc.range = BMI2_ACC_RANGE_2G;
@@ -301,11 +363,11 @@ static int8_t set_accel_gyro_config(struct bmi2_dev *bmi)
          *  1 -> High performance mode(Default)
          * For more info refer datasheet.
          */
-        config[ACCEL].cfg.acc.filter_perf = BMI2_PERF_OPT_MODE;
+        config[ACCEL].cfg.acc.filter_perf = BMI2_POWER_OPT_MODE;
 
         /* The user can change the following configuration parameters according to their requirement. */
         /* Set Output Data Rate */
-        config[GYRO].cfg.gyr.odr = BMI2_GYR_ODR_200HZ;
+        config[GYRO].cfg.gyr.odr = BMI2_GYR_ODR_25HZ;
 
         /* Gyroscope Angular Rate Measurement Range.By default the range is 2000dps. */
         config[GYRO].cfg.gyr.range = BMI2_GYR_RANGE_2000;
@@ -326,7 +388,7 @@ static int8_t set_accel_gyro_config(struct bmi2_dev *bmi)
          *  0 -> Ultra low power mode
          *  1 -> High performance mode(Default)
          */
-        config[GYRO].cfg.gyr.filter_perf = BMI2_PERF_OPT_MODE;
+        config[GYRO].cfg.gyr.filter_perf = BMI2_POWER_OPT_MODE;
 
         /* Set the accel and gyro configurations. */
         rslt = bmi2_set_sensor_config(config, 2, bmi);
@@ -343,7 +405,7 @@ __interrupt void PORT3_ISR(void) {
         case P3IV_P3IFG1 :
             GPIO_disableInterrupt(GPIO_PORT_P3, GPIO_PIN1);
             int1_status = 1;
-            __bic_SR_register_on_exit(LPM0_bits); // leave low power mode
+            __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
             break;
         default:
             break;
@@ -357,7 +419,7 @@ __interrupt void PORT4_ISR(void) {
         case P4IV_P4IFG0 :
             GPIO_disableInterrupt(GPIO_PORT_P4, GPIO_PIN0);
             int2_status = 1;
-            __bic_SR_register_on_exit(LPM0_bits); // leave low power mode
+            __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
             break;
         default:
             break;
@@ -416,10 +478,17 @@ void TIMER0_B1_ISR(void)
         case TBIV__TBCCR6:  break;      // CCR6 not used
         case TBIV__TBIFG:               // Overflow
            //interrupt every second
-           timer_in_seconds++;
-           if(timer_in_seconds > alarm_thres){
-                alarm_en = 1;
-                __bic_SR_register_on_exit(LPM0_bits); // leave low power mode
+           if(interval_setting_mode == 0){
+                timer_in_seconds++;
+
+                if(timer_in_seconds > alarm_thres){
+                    alarm_en = 1;
+                    __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
+                }
+           }
+
+           if(interval_setting_mode == 1){
+                __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
            }
            break;
         default: break;

@@ -8,9 +8,9 @@
 
 static const unsigned int n_interval_settings = 4;
 
-static const IntervalSetting default_interval_setting = {{0,0,0}, 20};
+static const IntervalSetting default_interval_setting = {{0,0,0}, 5};
 
-static const IntervalSetting available_interval_settings[n_interval_settings] = {
+static const IntervalSetting available_interval_settings[4] = {
     {{16620,-726,-575}, 5},//16620,-726,-575
     {{-16013,-663,-410}, 10},//-16013,-663,-410
     {{537,-16659,-442}, 20},//537,-16659,-442
