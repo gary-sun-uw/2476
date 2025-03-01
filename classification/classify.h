@@ -20,6 +20,7 @@ typedef struct IntervalSetting {
 ActionType classify(double average_vertical_position);
 
 ActionType tree_classify(Frame frames[5]);
+ActionType tree_classify_new(Frame frames[5]);
 
 /*
 	Return the interval setting matching the frame data if such a setting exists.
