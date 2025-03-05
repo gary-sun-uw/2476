@@ -15,9 +15,9 @@ ActionType classify(double average_vertical_position) {
 
 ActionType tree_classify_new(Frame frames[5]){
     Vec3d acc_average = vec3d_avg_unit_5(frames[0].acc, frames[1].acc, frames[2].acc, frames[3].acc, frames[4].acc);
-    double sim_to_sit = (1 - fabs(acc_average.x));
+    double sim_to_sit = (fabs(acc_average.x));
     double sim_to_stand = (1 - fabs(acc_average.x));
-    return sim_to_sit <= 0.3 ? SIT : sim_to_stand >= 0.8 ? STAND : OTHER;
+    return sim_to_sit >= 0.7 ? SIT : sim_to_stand >= 0.8 ? STAND : OTHER;
 }
 
 ActionType tree_classify(Frame frames[5]){

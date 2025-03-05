@@ -31,7 +31,7 @@ int8_t setup_features(struct bmi2_dev *bmi2_dev){
         // configs[0].cfg.any_motion.select_y = 0;
 
         /* 1LSB equals 20ms*/
-        configs[0].cfg.no_motion.duration = 0x40;
+        configs[0].cfg.no_motion.duration = 0x20;
         /* 1LSB equals to 0.48mg. Default is 70mg, setting to 50mg. */
         configs[0].cfg.no_motion.threshold = 0x64;
 

@@ -54,7 +54,6 @@ unsigned int counter = 0;
 unsigned int timer_in_seconds = 0;
 unsigned int alarm_en = 0;
 unsigned int alarm_thres = 10;
-unsigned int startup = 1;
 
 void init_spi();
 static int8_t set_accel_gyro_config(struct bmi2_dev *bmi);
@@ -150,13 +149,6 @@ void main (void)
         bmi270_map_feat_int(feat_int_map, NUM_FEAT, &bmi);
 
         do {
-            //Startup buzz to make sure power is connected
-            if (startup == 1){
-                startup == 0;
-                buzz_x = 2;
-                buzz_en = 1;
-            }
-            
             //Renable interrupts
             GPIO_clearInterrupt(GPIO_PORT_P3, GPIO_PIN1);
             GPIO_enableInterrupt(GPIO_PORT_P3, GPIO_PIN1);
@@ -295,13 +287,6 @@ void main (void)
 
                     int1_status_result = 0;
                 }
-
-                // if(alarm_en == 1){
-                //     Timer_B_stop(TIMER_B0_BASE);
-                //     timer_in_seconds = 0;
-                //     buzz_x = 4;
-                //     buzz_en = 1;
-                // }
             }
 
         } while(1);
