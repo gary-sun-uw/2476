@@ -54,6 +54,7 @@ unsigned int counter = 0;
 unsigned int timer_in_seconds = 0;
 unsigned int alarm_en = 0;
 unsigned int alarm_thres = 10;
+unsigned int sitting = 0;
 
 void init_spi();
 static int8_t set_accel_gyro_config(struct bmi2_dev *bmi);
@@ -108,10 +109,8 @@ void init_timerB() {
     param.timerClear = TIMER_B_DO_CLEAR;
     param.startTimer = false;
     Timer_B_initUpMode(TIMER_B0_BASE, &param);
-
-//    Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
-//    Timer_B_stop(TIMER_B0_BASE);
-
+    // timer B always counts for polling
+    Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
 }
 
 void main (void)
@@ -157,7 +156,6 @@ void main (void)
             GPIO_enableInterrupt(GPIO_PORT_P4, GPIO_PIN0);
 
             if(interval_setting_mode == 1){
-                Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
                 if(alarm_en == 1){
                     alarm_en = 0;
                     timer_in_seconds = 0;
@@ -207,10 +205,8 @@ void main (void)
 
                     buzz_en = 1;
                     interval_setting_mode = 0;
-                    Timer_B_stop(TIMER_B0_BASE);
                 }
             } else {
-
                 if(int2_status == 1){
                     int2_status = 0;
                     bmi2_get_int_status(&int2_status_result, &bmi);
@@ -228,65 +224,52 @@ void main (void)
                     int2_status_result = 0;
                 }
 
+                if(interval_setting_mode == 0){
+                    if(alarm_en == 1){
+                        buzz_x = 4;
+                        buzz_en = 1;
+                    }
 
-                if(int1_status == 1){
-                    int1_status = 0;
-                    bmi2_get_int_status(&int1_status_result, &bmi);
-                    /* To check the interrupt status of no-motion. */
-                    if (int1_status_result & BMI270_NO_MOT_STATUS_MASK){
-                        int indx = 0;
-                        Frame f[5];
-                        while (indx < 5)
+                    int indx = 0;
+                    Frame f[5];
+                    while (indx < 5)
+                    {
+                        rslt = bmi2_get_sensor_data(&sensor_data_temp, &bmi);
+                        if ((rslt == BMI2_OK) && (sensor_data_temp.status & BMI2_DRDY_ACC) )
                         {
-                            rslt = bmi2_get_sensor_data(&sensor_data_temp, &bmi);
-                            if ((rslt == BMI2_OK) && (sensor_data_temp.status & BMI2_DRDY_ACC) )
-                            {
-                                f[indx] = (struct Frame){
-                                    .acc = (struct Vec3d){
-                                        .x = sensor_data_temp.acc.x,
-                                        .y = sensor_data_temp.acc.y,
-                                        .z = sensor_data_temp.acc.z
-                                    }
-                                };
-
-                                indx++;
-                            }
-                        }
-
-                        indx = 0;
-                        switch (tree_classify_new(f)) {
-                            case STAND:
-                                //single buzz after standing for the first time
-                                if(alarm_en == 1){
-                                    buzz_x = 2;
-                                    buzz_en = 1;
+                            f[indx] = (struct Frame){
+                                .acc = (struct Vec3d){
+                                    .x = sensor_data_temp.acc.x,
+                                    .y = sensor_data_temp.acc.y,
+                                    .z = sensor_data_temp.acc.z
                                 }
-                                
-                                //always reset alarm and timer when standing up
-                                alarm_en = 0;
-                                timer_in_seconds = 0;
-                                //stop the timer
-                                Timer_B_stop(TIMER_B0_BASE);
-                                break;
-                            case SIT:
-                                // if alarm is off, start counter
-                                // if on, buzz twice when detected as still sitting
-                                if(alarm_en == 0){
-                                    Timer_B_startCounter(TIMER_B0_BASE, TIMER_B_UP_MODE);
-                                } else {
-                                    Timer_B_stop(TIMER_B0_BASE);
-                                    timer_in_seconds = 0;
-                                    buzz_x = 4;
-                                    buzz_en = 1;
-                                }
-                                break;
-                            case OTHER:
-                                break;
+                            };
+    
+                            indx++;
                         }
                     }
 
-                    int1_status_result = 0;
+                    switch (tree_classify_new(f)) {
+                        case STAND:
+                            sitting = 0;
+                            //single buzz after standing for the first time
+                            if(alarm_en == 1){
+                                buzz_x = 2;
+                                buzz_en = 1;
+                            }
+                            
+                            //always reset alarm and timer when standing up
+                            alarm_en = 0;
+                            timer_in_seconds = 0;
+                            break;
+                        case SIT:
+                            sitting = 1;
+                            break;
+                        case OTHER:
+                            break;
+                    }
                 }
+
             }
 
         } while(1);
@@ -377,11 +360,11 @@ static int8_t set_accel_gyro_config(struct bmi2_dev *bmi)
 #pragma vector = PORT3_VECTOR
 __interrupt void PORT3_ISR(void) {
     switch(__even_in_range(P3IV, P3IV_P3IFG7)){
-        case P3IV_P3IFG1 :
-            GPIO_disableInterrupt(GPIO_PORT_P3, GPIO_PIN1);
-            int1_status = 1;
-            __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
-            break;
+        // case P3IV_P3IFG1 :
+        //     GPIO_disableInterrupt(GPIO_PORT_P3, GPIO_PIN1);
+        //     int1_status = 1;
+        //     __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
+        //     break;
         default:
             break;
     }
@@ -454,17 +437,18 @@ void TIMER0_B1_ISR(void)
         case TBIV__TBIFG:               // Overflow
            //interrupt every second
            if(interval_setting_mode == 0){
-                timer_in_seconds++;
+                if(sitting){
+                    timer_in_seconds++;
 
-                if(timer_in_seconds > alarm_thres){
-                    alarm_en = 1;
-                    __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
+                    if(timer_in_seconds > alarm_thres){
+                        alarm_en = 1;
+                    }
                 }
            }
 
-           if(interval_setting_mode == 1){
-                __bic_SR_register_on_exit(LPM3_bits); // leave low power mode
-           }
+
+            __bic_SR_register_on_exit(LPM3_bits); // leave low power mode every second (polling)
+           
            break;
         default: break;
     }
